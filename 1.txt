@@ -1,0 +1,2 @@
+Simple text: 'Congratulations you were able to follow the circle, to succeed this new level, decipher the code contaoCngratulations you were able to follow the circle, to succeed this new level, decipher the code contains in those squeezed pickles '
+BZ uncompressed: b'S\'S\\\'S"S\\\\\\\'Well played, the password is mongo, send an email to kader@opt1mize.com with your solution and the password\\\\\\\'\\\\\\\\np0\\\\\\\\n."\\\\np0\\\\n.\\\'\\np0\\n.\'\np0\n.'
