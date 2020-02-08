@@ -10,7 +10,7 @@ to_replace = {'Реєстраційний номер\nоб’єкта нерух
               "Відомості про права власності\n": "",
               "код ЄДРПОУ:": "код ЄДРПОУ - ",
               "(кв.м):": "(кв.м) - ",
-              "RRP-4HHOMCVNR\n": "",
+              "RRP-4HIA3O5J2": "",
               "країна реєстрації:": "країна реєстрації - "
 }
 
@@ -31,7 +31,7 @@ csv_keys=[
 
 level_1 = "Реєстраційний номер об’єкта нерухомого майна"
 
-with open('input.txt', 'r') as my_file:
+with open('input.txt', 'r', encoding='windows-1251') as my_file:
     txt = my_file.read()
     for key in to_replace:
         txt = txt.replace(key, to_replace[key])
@@ -86,8 +86,7 @@ for record in result_1:
     result += '\n' + row
 
 #result+='\n'.join('|'.join(r.get(('' if k=="Реєстраційний номер об’єкта нерухомого майна" else k),'') for k in keys if k is not None for r in result_1))
-
     
-with open('out.csv','w') as my_file:
+with open('out-1.csv','w', encoding='windows-1251') as my_file:
     my_file.write(result)
 
