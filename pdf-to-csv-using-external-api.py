@@ -1,4 +1,42 @@
-    Інформація з Державного реєстру речових прав на нерухоме майно та його архівної
+import base64
+import requests
+import json
+from time import sleep
+
+START_CONVERSION_URL = "http://api.convertio.co/convert"
+API_KEY = "608745a3c9efe0236d0369f591d304ee"
+GET_CONVERSION_STATUS_URL = "https://api.convertio.co/convert/{id}/status"
+GET_CONVERTED_FILE_URL = "https://api.convertio.co/convert/{id}/dl"
+SLEEP_TIME = 10
+
+to_replace = {'Реєстраційний номер\nоб’єкта нерухомого\nмайна:': 'Реєстраційний номер об’єкта нерухомого майна:',
+              # 'Актуальна інформація про об’єкт нерухомого майна': '',
+              "Об’єкт нерухомого\nмайна": "Об’єкт нерухомого майна",
+              "Відомості про права власності\n": "",
+              "код ЄДРПОУ:": "код ЄДРПОУ - ",
+              "(кв.м):": "(кв.м) - ",
+              "RRP-4HIA3O5J2": "",
+              "країна реєстрації:": "країна реєстрації - "
+              }
+
+csv_keys = [
+    "Реєстраційний номер об’єкта нерухомого майна",
+    "Об’єкт нерухомого майна",
+    "Площа",
+    "Адреса",
+    "Номер запису про право власності",
+    "Форма власності",
+    "Розмір частки",
+    "Власники",
+    "Номер запису про право власності2",
+    "Форма власності2",
+    "Розмір частки2",
+    "Власники2",
+]
+
+level_1 = "Реєстраційний номер об’єкта нерухомого майна"
+
+test_data = """    Інформація з Державного реєстру речових прав на нерухоме майно та його архівної
                    складової частини щодо об’єкта нерухомого майна
                           (Щодо багатоквартирного будинку)
 
@@ -667,3 +705,108 @@
 
                                                                                       RRP-4HINQBNHS
 
+"""
+
+def pdf2txt(file_content):
+    content = base64.b64encode(file_content).decode('utf-8')
+    result = requests.post(url=START_CONVERSION_URL,
+                           data=json.dumps({"apikey": API_KEY, "input": "base64", "file": content,
+                                            "filename": "in.pdf", "outputformat": "file_content"}))
+
+    if result.status_code != 200:
+        raise Exception(result.text)
+
+    data = result.json()['data']
+    id = data['id']
+    print(f"Start conversion response: {data}")
+
+    while True:
+        print(f"Start sleeping for {SLEEP_TIME} seconds")
+        sleep(SLEEP_TIME)
+
+        result = requests.get(url=GET_CONVERSION_STATUS_URL.format(id=id))
+        if result.status_code != 200:
+            raise Exception(result.text)
+
+        data = result.json()['data']
+        print(f"Conversion status response: {data}")
+
+        if data['step'] == 'finish':
+            break
+
+    result = requests.get(url=GET_CONVERTED_FILE_URL.format(id=id))
+    if result.status_code != 200:
+        raise Exception(result.text)
+
+    data = result.json()['data']
+    if data.get('error'):
+        print(f"Conversion error: {data.get('error')}")
+        raise Exception(data.get('error'))
+
+    return base64.b64decode(data['content']).decode('utf-8')
+
+
+def txt2csv(file_content: str):
+    for key in to_replace:
+        file_content = file_content.replace(key, to_replace[key])
+    result = file_content.replace(":\n", ":")
+    result = [res for res in result.split("\n") if
+              "стор." not in res]  # [res for res in result.split(level_1) if "стор." not in res]
+    result_1 = []
+
+    for i in range(0, len(result) - 1):
+        if ":" in result[i]:
+            result_1.append(result[i])
+        else:
+            if len(result_1) > 0:
+                result_1[len(result_1) - 1] = result_1[len(result_1) - 1] + ' ' + result[i]
+            else:
+                result_1.append(result[i])
+
+    result = result_1
+    result_1 = []
+
+    for elem in '\n'.join(result).split(level_1):
+
+        keys = list(s.split(':')[0] for s in elem.split('\n'))
+        new_keys = []
+        for key in keys:
+            cnt = 2
+            if key in new_keys:
+                key = key + str(cnt)
+                cnt += 1
+            new_keys.append(key)
+
+        new_dict = {}
+        cnt = 0
+        for s in elem.split('\n'):
+            para = s.split(':')
+            if len(para) <= 1: continue
+            new_dict[new_keys[cnt]] = para[1]
+            cnt += 1
+
+        result_1.append(new_dict)
+
+    result = '|'.join(csv_keys)
+
+    result_1.pop(0)
+
+    for record in result_1:
+        row = ''
+        for key in csv_keys:
+            row += record.get('' if key == csv_keys[0] else key, '') + '|'
+
+        result += '\n' + row
+
+    return result
+
+
+with open('input.txt', 'w') as file_txt:
+    file_content = test_data # pdf2txt("test.pdf")
+    file_txt.write(file_content)
+
+    with open('out.csv', 'w') as file_csv:
+        file_content = txt2csv(file_content)
+        file_csv.write(file_content)
+
+

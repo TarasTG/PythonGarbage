@@ -4,10 +4,37 @@ from itertools import takewhile
 import locale
 import csv
 import openpyxl
-#from pdfminer import high_level
-
+from pdfminer.pdfinterp import PDFResourceManager, PDFPageInterpreter
+from pdfminer.converter import TextConverter
+from pdfminer.layout import LAParams
+from pdfminer.pdfpage import PDFPage
+from io import StringIO
 
 default_encoding = locale.getpreferredencoding()
+
+
+def convert_pdf_to_txt(path):
+    rsrcmgr = PDFResourceManager()
+    retstr = StringIO()
+    codec = 'utf-8'
+    laparams = LAParams()
+    device = TextConverter(rsrcmgr, retstr, codec=codec, laparams=laparams)
+    fp = open(path, 'rb')
+    interpreter = PDFPageInterpreter(rsrcmgr, device)
+    password = ""
+    maxpages = 0
+    caching = True
+    pagenos=set()
+
+    for page in PDFPage.get_pages(fp, pagenos, maxpages=maxpages, password=password,caching=caching, check_extractable=True):
+        interpreter.process_page(page)
+
+    text = retstr.getvalue()
+
+    fp.close()
+    device.close()
+    retstr.close()
+    return text
 
 
 def convert_csv_to_xlsx(csv_filename, xlsx_filename, csv_delimiter=",", csv_file_encoding=default_encoding):
@@ -123,12 +150,9 @@ def prepare_csv():
         for record in result_2:
             my_file.write('|'.join([str(record.get(key, '')) for key in header]))
             my_file.write("\n")
-"""
-with open('test2.pdf', 'rb') as pdffile:
-    with open('input.txt', 'w') as txtfile:
-        high_level.extract_text_to_fp(pdffile, txtfile)
-        pass
-"""
-prepare_csv()
+
+
+convert_pdf_to_txt("test.pdf")
+#prepare_csv()
 
 #do_convert(delimiter='|', encoding='utf-8', csv_file='out-2.csv', xlsx_file='out.xlsx')
