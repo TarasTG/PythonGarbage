@@ -1,7 +1,10 @@
 import base64
-import requests
 import json
 from time import sleep
+import csv
+from itertools import chain
+
+import requests
 
 START_CONVERSION_URL = "http://api.convertio.co/convert"
 API_KEY = "608745a3c9efe0236d0369f591d304ee"
@@ -9,32 +12,27 @@ GET_CONVERSION_STATUS_URL = "https://api.convertio.co/convert/{id}/status"
 GET_CONVERTED_FILE_URL = "https://api.convertio.co/convert/{id}/dl"
 SLEEP_TIME = 10
 
-to_replace = {'Реєстраційний номер\nоб’єкта нерухомого\nмайна:': 'Реєстраційний номер об’єкта нерухомого майна:',
-              # 'Актуальна інформація про об’єкт нерухомого майна': '',
-              "Об’єкт нерухомого\nмайна": "Об’єкт нерухомого майна",
-              "Відомості про права власності\n": "",
-              "код ЄДРПОУ:": "код ЄДРПОУ - ",
-              "(кв.м):": "(кв.м) - ",
-              "RRP-4HIA3O5J2": "",
-              "країна реєстрації:": "країна реєстрації - "
+level_1_destination_delimiter = '^level_1^'
+level_2_destination_delimiter = '^level_2^'
+to_replace = {"Актуальна інформація про об’єкт нерухомого майна": level_1_destination_delimiter,
+              "ВІДОМОСТІ ПРО ОБ’ЄКТ НЕРУХОМОГО МАЙНА": level_1_destination_delimiter,
+              "Відомості про права власності": level_2_destination_delimiter,
+              "ВІДОМОСТІ ПРО ПРАВА ВЛАСНОСТІ": level_2_destination_delimiter,
+              "Дата внесення запису": level_2_destination_delimiter + "Дата внесення запису",
               }
 
-csv_keys = [
-    "Реєстраційний номер об’єкта нерухомого майна",
-    "Об’єкт нерухомого майна",
-    "Площа",
-    "Адреса",
-    "Номер запису про право власності",
-    "Форма власності",
-    "Розмір частки",
-    "Власники",
-    "Номер запису про право власності2",
-    "Форма власності2",
-    "Розмір частки2",
-    "Власники2",
-]
+main_info_starts = ["Реєстраційний номер", ]
+own_info_starts = ["Дата внесення запису", "Номер запису про право власності / довірчої власності"]
+skippers = ['стор.', 'RRP-', 'ВІДОМОСТІ',"З РЕЄСТРУ ПРАВ ВЛАСНОСТІ НА НЕРУХОМЕ МАЙНО"]
 
-level_1 = "Реєстраційний номер об’єкта нерухомого майна"
+key_substitution = {"Реєстраційний номер об’єкта нерухомого майна:": "Реєстраційний номер майна:",
+                    "Об’єкт нерухомого майна:": "Тип майна:",
+                    "Загальна площа (кв.м):": "Площа:",
+                    "Адреса нерухомого майна:": "Адреса:"
+                    }
+
+csv_keys = list(key_substitution.values())
+csv_keys.append("Власники")
 
 test_data = """    Інформація з Державного реєстру речових прав на нерухоме майно та його архівної
                    складової частини щодо об’єкта нерухомого майна
@@ -245,7 +243,7 @@ test_data = """    Інформація з Державного реєстру �
 
 
                                                                                       RRP-4HINQBNHS
-Тип права власності:      Право власності
+Тип права власності:      Право власності
 Форма власності:          приватна
 Розмір частки:            1/1
 Власники:                 Колтунова Світлана Борисівна
@@ -707,6 +705,7 @@ test_data = """    Інформація з Державного реєстру �
 
 """
 
+
 def pdf2txt(file_content):
     content = base64.b64encode(file_content).decode('utf-8')
     result = requests.post(url=START_CONVERSION_URL,
@@ -746,67 +745,109 @@ def pdf2txt(file_content):
     return base64.b64decode(data['content']).decode('utf-8')
 
 
-def txt2csv(file_content: str):
-    for key in to_replace:
-        file_content = file_content.replace(key, to_replace[key])
-    result = file_content.replace(":\n", ":")
-    result = [res for res in result.split("\n") if
-              "стор." not in res]  # [res for res in result.split(level_1) if "стор." not in res]
-    result_1 = []
+def txt2dict(file_content: str):
+    def _cut_starts(data, templates):
+        for template in templates:
+            if template in data:
+                return data[data.index(template):]
+        return data
 
-    for i in range(0, len(result) - 1):
-        if ":" in result[i]:
-            result_1.append(result[i])
-        else:
-            if len(result_1) > 0:
-                result_1[len(result_1) - 1] = result_1[len(result_1) - 1] + ' ' + result[i]
+    def _skip_unneeded_items(record, unneeded_items):
+        result_record = []
+        for line in record:
+
+            new_line = []
+            for block in line:
+                skip_block = any(filter(lambda x: (x in block) or (not block.strip()), unneeded_items))
+                if skip_block:
+                    continue
+                new_line.append(block)
+
+            result_record.append(new_line)
+
+        return result_record
+
+    def _cleanup_record(record):
+        result_record = []
+        for line in record:
+            new_line = [block for block in line if block.strip()]
+            if new_line:
+                result_record.append(new_line)
+
+        return result_record
+
+    def _build_dict_record(record):
+        main_info_block = record[0]
+
+        key_parts = [item[:item.index(':') + 1].strip() if ':' in item else item[:25].strip() for item in main_info_block]
+        value_parts = [item[item.index(':') + 1:].strip() if ':' in item else item[25:].strip() for item in main_info_block]
+
+        key_index = 0
+        key = ''
+        keys = []
+        for key_part in key_parts:
+            key_index += 1
+            key += key_part + ' '
+            if ':' in key_part:
+                keys.append((key.strip(), key_index))
+                key = ''
+                key_index = 0
+
+        if key:
+            keys.append((key.strip(), key_index))
+
+        fixed_keys = []
+
+        offset = 0
+        for index in range(len(keys)-1, -1, -1):
+            if not keys[index][0]:
+                offset += 1
             else:
-                result_1.append(result[i])
+                fixed_keys.append((keys[index][0], keys[index][1] + offset))
+                offset = 0
 
-    result = result_1
-    result_1 = []
+        record[0] = {}
 
-    for elem in '\n'.join(result).split(level_1):
+        index = 0
+        fixed_keys.reverse()
+        for key, cnt in fixed_keys:
+            record[0][key] = ' '.join(value_parts[index:index+cnt])
+            index += cnt
 
-        keys = list(s.split(':')[0] for s in elem.split('\n'))
-        new_keys = []
-        for key in keys:
-            cnt = 2
-            if key in new_keys:
-                key = key + str(cnt)
-                cnt += 1
-            new_keys.append(key)
+        return record
 
-        new_dict = {}
-        cnt = 0
-        for s in elem.split('\n'):
-            para = s.split(':')
-            if len(para) <= 1: continue
-            new_dict[new_keys[cnt]] = para[1]
-            cnt += 1
+    def _build_dict_records(records):
+        return [_build_dict_record(record) for record in records]
 
-        result_1.append(new_dict)
+    for from_what, to_what in to_replace.items():
+        file_content = file_content.replace(from_what, to_what)
 
-    result = '|'.join(csv_keys)
+    file_content = file_content.split(level_1_destination_delimiter)[1:]
 
-    result_1.pop(0)
+    records = []
 
-    for record in result_1:
-        row = ''
-        for key in csv_keys:
-            row += record.get('' if key == csv_keys[0] else key, '') + '|'
+    for block in file_content:
+        data = block.split(level_2_destination_delimiter)
 
-        result += '\n' + row
+        record = [_cut_starts(data[0], main_info_starts).split('\n'),
+                  *[_cut_starts(owner, own_info_starts).split('\n') for owner in data[1:]]]
 
-    return result
+        record = _skip_unneeded_items(record, skippers)
+        record = _cleanup_record(record)
+        if record:
+            records.append(record)
 
+    records = _build_dict_records(records)
 
-with open('input.txt', 'w') as file_txt:
-    file_content = test_data # pdf2txt("test.pdf")
-    file_txt.write(file_content)
+    for record in records:
+        record[0] = {key_substitution.get(key, key):value for key, value in record[0].items()}
+        record[0]['Власники'] = chr(10).join(chain(*record[1:]))
+        del record[1]
 
-    with open('out.csv', 'w') as file_csv:
-        file_content = txt2csv(file_content)
-        file_csv.write(file_content)
+    return [record[0] for record in records]
 
 
+with open('out.csv', 'w') as file_csv:
+    file_content = txt2dict(test_data)
+    writer = csv.DictWriter(file_csv, fieldnames=csv_keys, quoting=csv.QUOTE_ALL)
+    writer.writerows(file_content)
