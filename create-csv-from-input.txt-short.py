@@ -27,7 +27,8 @@ csv_keys=[
 
 level_1 = "Реєстраційний номер об’єкта нерухомого майна"
 
-with open('input.txt', 'r', encoding='windows-1251') as my_file:
+#with open('input.txt', 'r', encoding='windows-1251') as my_file:
+with open('input.txt', 'r') as my_file:
     txt = my_file.read()
     for key in to_replace:
         txt = txt.replace(key, to_replace[key])
